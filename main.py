@@ -2,8 +2,13 @@
 import os
 import random
 import discord
+import asyncio
 from discord.ext import commands
 from dotenv import load_dotenv
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.jobstores.base import JobLookupError
+
 
 
 load_dotenv()                           #loads the .env file and gets the values below
@@ -13,9 +18,10 @@ GUILD = os.getenv('DISCORD_GUILD')
 intents = discord.Intents.default()     #initializes the intents used by the bot in any server
 intents.members = True                  #something like permissions in discord
 intents.message_content = True
-client = discord.Client(intents=intents)
+intents.presences = True
 
 bot = commands.Bot(command_prefix='!',intents=intents)      #sets the prefix for bot commands, can be set to almost anything
+
 
 @bot.event
 async def on_ready():
@@ -56,14 +62,6 @@ async def nine_nine(ctx):
     response = random.choice(brooklyn_99_quotes)
     await ctx.send(response)
 
-@bot.command(name='roll_dice', help='Simulates rolling dice and posts the result. type the command followed by the number of dice and the number of sides ex: !roll_dice 2 6')
-async def roll(ctx, number_of_dice: int, number_of_sides: int):
-    dice = [
-        str(random.choice(range(1, number_of_sides + 1)))
-        for _ in range(number_of_dice)
-    ]
-    await ctx.send(', '.join(dice))
-
 @bot.command(name='create-channel')
 @commands.has_role('admin')
 async def create_channel(ctx, channel_name='real-python'):
@@ -79,4 +77,101 @@ async def on_command_error(ctx, error):
         await ctx.send('You do not have the correct role for this command.')
 
 
-bot.run(TOKEN)
+# Bot ready event
+@bot.event
+async def on_ready():
+    
+    import cogs.subscriptions as sub
+    print(f'{bot.user.name} has connected to Discord!')
+    
+    # Create scheduler for calendar events
+    bot.scheduler = AsyncIOScheduler()
+    bot.scheduler.start()
+    
+    # Start task to check for upcoming subscriptions
+    sub.check_subscriptions.start()
+    
+    # Set bot status
+    await bot.change_presence(activity=discord.Activity(
+        type=discord.ActivityType.listening, 
+        name="!devhelp for commands"
+    ))
+
+# Error handling
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        await ctx.send("Command not found. Try `!help` to see all available commands.")
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"Missing required argument: {error.param.name}")
+    else:
+        await ctx.send(f"An error occurred: {error}")
+        print(f"Error: {error}")
+
+# Help command
+@bot.command(name='devhelp')
+async def custom_help(ctx):
+    help_embed = discord.Embed(
+        title="Utility Bot Commands",
+        description="Here are all the available commands:",
+        color=discord.Color.blue()
+    )
+    
+    help_embed.add_field(
+        name="GIF Commands",
+        value="!gif [search term] - Send a GIF related to your search term",
+        inline=False
+    )
+    
+    help_embed.add_field(
+        name="Dice Commands",
+        value="!roll [dice notation] - Roll dice (e.g., !roll 2d6+3)",
+        inline=False
+    )
+    
+    help_embed.add_field(
+        name="Time Commands",
+        value=("!convert [time] [from_tz] [to_tz] - Convert time between timezones\n"
+               "!alltime [time] [from_tz] - Show time in all major timezones"),
+        inline=False
+    )
+    
+    help_embed.add_field(
+        name="Server Commands",
+        value="!stats - Show server statistics",
+        inline=False
+    )
+    
+    help_embed.add_field(
+        name="Calendar Commands",
+        value=("!addevent [name] [date] [time] - Add an event\n"
+               "!events - List all upcoming events\n"
+               "!delevent [event_id] - Delete an event by ID"),
+        inline=False
+    )
+    
+    help_embed.add_field(
+        name="Subscription Commands",
+        value=("!addsub [name] [amount] [due_date] - Add a subscription\n"
+               "!subs - List all active subscriptions\n"
+               "!delsub [sub_id] - Delete a subscription by ID\n"
+               "!renewsub [sub_id] - Mark subscription as paid and update due date"),
+        inline=False
+    )
+    
+    await ctx.send(embed=help_embed)
+
+async def load_extenstions():           #loads all cogs
+    await bot.load_extension('cogs.subscriptions')
+    await bot.load_extension('cogs.calendar_func')
+    await bot.load_extension('cogs.gif')
+    await bot.load_extension('cogs.roll_dice')
+    await bot.load_extension('cogs.convert_time')
+    await bot.load_extension('cogs.stats')
+
+async def main():                   # runs extensions and the bot when called with asyncio.run
+    async with bot:                 # this helps awaiting coroutines that are created with load_extensions()
+        await load_extenstions()
+        await bot.start(TOKEN)
+
+asyncio.run(main())
