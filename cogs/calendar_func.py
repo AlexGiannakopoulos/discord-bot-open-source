@@ -4,6 +4,7 @@ import uuid
 from discord.ext import commands
 import discord
 from apscheduler.jobstores.base import JobLookupError
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from . import data as Data
 
 intents = discord.Intents.default()
@@ -11,6 +12,9 @@ intents.members = True
 intents.message_content = True
 
 bot = commands.Bot(command_prefix='!',intents=intents)
+
+bot.scheduler = AsyncIOScheduler()
+bot.scheduler.start()
 
 class CalendarCog(commands.Cog):
     def __init__(self, bot):
